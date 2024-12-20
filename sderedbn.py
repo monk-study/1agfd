@@ -154,15 +154,15 @@ def xgboost_pipeline():
     
     # Train model
     train_task = train_xgboost_model(
-        train_features_path=preprocess_task.outputs['output'][0],
-        train_labels_path=preprocess_task.outputs['output'][1]
+        train_features_path=preprocess_task.output[0],
+        train_labels_path=preprocess_task.output[1]
     )
     
     # Evaluate model
     evaluate_task = evaluate_model(
         model_path=train_task.output,
-        test_features_path=preprocess_task.outputs['output'][2],
-        test_labels_path=preprocess_task.outputs['output'][3]
+        test_features_path=preprocess_task.output[2],
+        test_labels_path=preprocess_task.output[3]
     )
 
 if __name__ == '__main__':
