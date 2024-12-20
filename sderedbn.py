@@ -1,8 +1,13 @@
 import kfp
 from kfp import dsl
-from kfp.components import func_to_container_op
+from kfp.dsl import component
+from typing import List
 
-def generate_and_preprocess_data():
+@component(
+    base_image='python:3.9',
+    packages_to_install=['pandas', 'numpy', 'scikit-learn']
+)
+def generate_and_preprocess_data() -> List[str]:
     """Generate synthetic data and preprocess it for training"""
     import pandas as pd
     import numpy as np
@@ -56,7 +61,14 @@ def generate_and_preprocess_data():
     return ['/tmp/train_features.csv', '/tmp/train_labels.csv', 
             '/tmp/test_features.csv', '/tmp/test_labels.csv']
 
-def train_xgboost_model(train_features_path: str, train_labels_path: str) -> str:
+@component(
+    base_image='python:3.9',
+    packages_to_install=['pandas', 'xgboost']
+)
+def train_xgboost_model(
+    train_features_path: str,
+    train_labels_path: str
+) -> str:
     """Train XGBoost model with the processed data"""
     import pandas as pd
     import xgboost as xgb
@@ -89,7 +101,15 @@ def train_xgboost_model(train_features_path: str, train_labels_path: str) -> str
     model.save_model(model_path)
     return model_path
 
-def evaluate_model(model_path: str, test_features_path: str, test_labels_path: str) -> dict:
+@component(
+    base_image='python:3.9',
+    packages_to_install=['pandas', 'xgboost', 'scikit-learn']
+)
+def evaluate_model(
+    model_path: str,
+    test_features_path: str,
+    test_labels_path: str
+) -> dict:
     """Evaluate the trained model"""
     import pandas as pd
     import xgboost as xgb
@@ -124,43 +144,30 @@ def evaluate_model(model_path: str, test_features_path: str, test_labels_path: s
     
     return metrics
 
-# Create component operations
-generate_op = func_to_container_op(generate_and_preprocess_data, 
-                                 base_image='python:3.9',
-                                 packages_to_install=['pandas', 'numpy', 'scikit-learn'])
-
-train_op = func_to_container_op(train_xgboost_model, 
-                              base_image='python:3.9',
-                              packages_to_install=['pandas', 'xgboost'])
-
-evaluate_op = func_to_container_op(evaluate_model, 
-                                 base_image='python:3.9',
-                                 packages_to_install=['pandas', 'xgboost', 'scikit-learn'])
-
-# Define the pipeline
 @dsl.pipeline(
     name='XGBoost Training Pipeline',
     description='A pipeline to train and evaluate XGBoost model on synthetic data'
 )
 def xgboost_pipeline():
     # Generate and preprocess data
-    preprocess_task = generate_op()
+    preprocess_task = generate_and_preprocess_data()
     
     # Train model
-    train_task = train_op(
-        train_features_path=preprocess_task.outputs[0],
-        train_labels_path=preprocess_task.outputs[1]
+    train_task = train_xgboost_model(
+        train_features_path=preprocess_task.outputs['output'][0],
+        train_labels_path=preprocess_task.outputs['output'][1]
     )
     
     # Evaluate model
-    evaluate_task = evaluate_op(
+    evaluate_task = evaluate_model(
         model_path=train_task.output,
-        test_features_path=preprocess_task.outputs[2],
-        test_labels_path=preprocess_task.outputs[3]
+        test_features_path=preprocess_task.outputs['output'][2],
+        test_labels_path=preprocess_task.outputs['output'][3]
     )
 
-# Compile the pipeline
-kfp.compiler.Compiler().compile(
-    pipeline_func=xgboost_pipeline,
-    package_path='xgboost_pipeline.yaml'
-)
+if __name__ == '__main__':
+    # Compile the pipeline
+    kfp.compiler.Compiler().compile(
+        pipeline_func=xgboost_pipeline,
+        package_path='xgboost_pipeline.yaml'
+    )
