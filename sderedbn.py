@@ -1,18 +1,26 @@
 import kfp
 from kfp import dsl
 from kfp.dsl import component
-from typing import List
+from typing import NamedTuple
 
 @component(
     base_image='python:3.9',
     packages_to_install=['pandas', 'numpy', 'scikit-learn']
 )
-def generate_and_preprocess_data() -> List[str]:
-    """Generate synthetic data and preprocess it for training"""
+def generate_and_preprocess_data() -> NamedTuple(
+    'Outputs',
+    [
+        ('train_features', str),
+        ('train_labels', str),
+        ('test_features', str),
+        ('test_labels', str)
+    ]
+):
     import pandas as pd
     import numpy as np
     from sklearn.preprocessing import StandardScaler
     from sklearn.model_selection import train_test_split
+    from typing import NamedTuple
     
     # Generate synthetic data
     np.random.seed(42)
@@ -58,8 +66,19 @@ def generate_and_preprocess_data() -> List[str]:
     X_test.to_csv('/tmp/test_features.csv', index=False)
     y_test.to_csv('/tmp/test_labels.csv', index=False)
     
-    return ['/tmp/train_features.csv', '/tmp/train_labels.csv', 
-            '/tmp/test_features.csv', '/tmp/test_labels.csv']
+    output = NamedTuple('Outputs', [
+        ('train_features', str),
+        ('train_labels', str),
+        ('test_features', str),
+        ('test_labels', str)
+    ])
+    
+    return output(
+        train_features='/tmp/train_features.csv',
+        train_labels='/tmp/train_labels.csv',
+        test_features='/tmp/test_features.csv',
+        test_labels='/tmp/test_labels.csv'
+    )
 
 @component(
     base_image='python:3.9',
@@ -154,15 +173,15 @@ def xgboost_pipeline():
     
     # Train model
     train_task = train_xgboost_model(
-        train_features_path=preprocess_task.output[0],
-        train_labels_path=preprocess_task.output[1]
+        train_features_path=preprocess_task.outputs['train_features'],
+        train_labels_path=preprocess_task.outputs['train_labels']
     )
     
     # Evaluate model
     evaluate_task = evaluate_model(
         model_path=train_task.output,
-        test_features_path=preprocess_task.output[2],
-        test_labels_path=preprocess_task.output[3]
+        test_features_path=preprocess_task.outputs['test_features'],
+        test_labels_path=preprocess_task.outputs['test_labels']
     )
 
 if __name__ == '__main__':
