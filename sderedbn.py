@@ -1,10 +1,8 @@
+import kfp
 from kfp import dsl
-from kfp import compiler
-from typing import List
-import kfp.components as comp
+from kfp.components import func_to_container_op
 
-@comp.component
-def generate_and_preprocess_data() -> List[str]:
+def generate_and_preprocess_data():
     """Generate synthetic data and preprocess it for training"""
     import pandas as pd
     import numpy as np
@@ -58,7 +56,6 @@ def generate_and_preprocess_data() -> List[str]:
     return ['/tmp/train_features.csv', '/tmp/train_labels.csv', 
             '/tmp/test_features.csv', '/tmp/test_labels.csv']
 
-@comp.component
 def train_xgboost_model(train_features_path: str, train_labels_path: str) -> str:
     """Train XGBoost model with the processed data"""
     import pandas as pd
@@ -92,7 +89,6 @@ def train_xgboost_model(train_features_path: str, train_labels_path: str) -> str
     model.save_model(model_path)
     return model_path
 
-@comp.component
 def evaluate_model(model_path: str, test_features_path: str, test_labels_path: str) -> dict:
     """Evaluate the trained model"""
     import pandas as pd
@@ -128,30 +124,43 @@ def evaluate_model(model_path: str, test_features_path: str, test_labels_path: s
     
     return metrics
 
+# Create component operations
+generate_op = func_to_container_op(generate_and_preprocess_data, 
+                                 base_image='python:3.9',
+                                 packages_to_install=['pandas', 'numpy', 'scikit-learn'])
+
+train_op = func_to_container_op(train_xgboost_model, 
+                              base_image='python:3.9',
+                              packages_to_install=['pandas', 'xgboost'])
+
+evaluate_op = func_to_container_op(evaluate_model, 
+                                 base_image='python:3.9',
+                                 packages_to_install=['pandas', 'xgboost', 'scikit-learn'])
+
+# Define the pipeline
 @dsl.pipeline(
     name='XGBoost Training Pipeline',
     description='A pipeline to train and evaluate XGBoost model on synthetic data'
 )
 def xgboost_pipeline():
     # Generate and preprocess data
-    preprocess_op = generate_and_preprocess_data()
+    preprocess_task = generate_op()
     
     # Train model
-    train_op = train_xgboost_model(
-        train_features_path=preprocess_op.outputs[0],
-        train_labels_path=preprocess_op.outputs[1]
+    train_task = train_op(
+        train_features_path=preprocess_task.outputs[0],
+        train_labels_path=preprocess_task.outputs[1]
     )
     
     # Evaluate model
-    evaluate_op = evaluate_model(
-        model_path=train_op.output,
-        test_features_path=preprocess_op.outputs[2],
-        test_labels_path=preprocess_op.outputs[3]
+    evaluate_task = evaluate_op(
+        model_path=train_task.output,
+        test_features_path=preprocess_task.outputs[2],
+        test_labels_path=preprocess_task.outputs[3]
     )
 
-if __name__ == '__main__':
-    # Compile the pipeline
-    compiler.Compiler().compile(
-        pipeline_func=xgboost_pipeline,
-        package_path='xgboost_pipeline.yaml'
-    )
+# Compile the pipeline
+kfp.compiler.Compiler().compile(
+    pipeline_func=xgboost_pipeline,
+    package_path='xgboost_pipeline.yaml'
+)
