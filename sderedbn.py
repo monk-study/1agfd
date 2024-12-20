@@ -1,9 +1,10 @@
-import kfp
 from kfp import dsl
-from kfp.components import create_component_from_func
+from kfp import compiler
+from typing import List
+import kfp.components as comp
 
-@create_component_from_func
-def generate_and_preprocess_data():
+@comp.component
+def generate_and_preprocess_data() -> List[str]:
     """Generate synthetic data and preprocess it for training"""
     import pandas as pd
     import numpy as np
@@ -30,6 +31,8 @@ def generate_and_preprocess_data():
     df = pd.DataFrame(features)
     df['target'] = target
     
+    print("Generated data shape:", df.shape)
+    
     # Handle categorical variables
     df = pd.get_dummies(df, columns=['categorical1', 'categorical2'])
     
@@ -55,16 +58,17 @@ def generate_and_preprocess_data():
     return ['/tmp/train_features.csv', '/tmp/train_labels.csv', 
             '/tmp/test_features.csv', '/tmp/test_labels.csv']
 
-@create_component_from_func
-def train_xgboost_model(train_features: str, train_labels: str) -> str:
+@comp.component
+def train_xgboost_model(train_features_path: str, train_labels_path: str) -> str:
     """Train XGBoost model with the processed data"""
     import pandas as pd
     import xgboost as xgb
-    import pickle
     
     # Load data
-    X_train = pd.read_csv(train_features)
-    y_train = pd.read_csv(train_labels)
+    X_train = pd.read_csv(train_features_path)
+    y_train = pd.read_csv(train_labels_path)
+    
+    print("Training data shape:", X_train.shape)
     
     # Convert to DMatrix
     dtrain = xgb.DMatrix(X_train, label=y_train.values.ravel())
@@ -88,19 +92,21 @@ def train_xgboost_model(train_features: str, train_labels: str) -> str:
     model.save_model(model_path)
     return model_path
 
-@create_component_from_func
-def evaluate_model(model_path: str, test_features: str, test_labels: str) -> dict:
+@comp.component
+def evaluate_model(model_path: str, test_features_path: str, test_labels_path: str) -> dict:
     """Evaluate the trained model"""
     import pandas as pd
     import xgboost as xgb
     from sklearn.metrics import accuracy_score, precision_score, recall_score
-    from sklearn.metrics import f1_score, roc_auc_score, confusion_matrix
+    from sklearn.metrics import f1_score, roc_auc_score
     
     # Load model and test data
     model = xgb.Booster()
     model.load_model(model_path)
-    X_test = pd.read_csv(test_features)
-    y_test = pd.read_csv(test_labels)
+    X_test = pd.read_csv(test_features_path)
+    y_test = pd.read_csv(test_labels_path)
+    
+    print("Test data shape:", X_test.shape)
     
     # Make predictions
     dtest = xgb.DMatrix(X_test)
@@ -116,6 +122,10 @@ def evaluate_model(model_path: str, test_features: str, test_labels: str) -> dic
         'auc_roc': float(roc_auc_score(y_test, y_pred_proba))
     }
     
+    print("\nModel Evaluation Metrics:")
+    for metric, value in metrics.items():
+        print(f"{metric}: {value:.4f}")
+    
     return metrics
 
 @dsl.pipeline(
@@ -128,19 +138,20 @@ def xgboost_pipeline():
     
     # Train model
     train_op = train_xgboost_model(
-        train_features=preprocess_op.outputs[0],
-        train_labels=preprocess_op.outputs[1]
+        train_features_path=preprocess_op.outputs[0],
+        train_labels_path=preprocess_op.outputs[1]
     )
     
     # Evaluate model
     evaluate_op = evaluate_model(
         model_path=train_op.output,
-        test_features=preprocess_op.outputs[2],
-        test_labels=preprocess_op.outputs[3]
+        test_features_path=preprocess_op.outputs[2],
+        test_labels_path=preprocess_op.outputs[3]
     )
 
-# Compile the pipeline
-kfp.compiler.Compiler().compile(
-    pipeline_func=xgboost_pipeline,
-    package_path='xgboost_pipeline.yaml'
-)
+if __name__ == '__main__':
+    # Compile the pipeline
+    compiler.Compiler().compile(
+        pipeline_func=xgboost_pipeline,
+        package_path='xgboost_pipeline.yaml'
+    )
